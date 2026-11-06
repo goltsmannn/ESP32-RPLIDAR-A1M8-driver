@@ -7,11 +7,14 @@
 #include "hal/gpio_types.h"
 #include "hal/uart_types.h"
 #include "esp_log.h"
+#include "portmacro.h"
 
-#define UART_RX_PIN GPIO_NUM_18
-#define UART_TX_PIN GPIO_NUM_19
+#define UART_RX_PIN GPIO_NUM_19
+#define UART_TX_PIN GPIO_NUM_18
 #define LIDAR_MOTOR_PIN GPIO_NUM_20
+
 QueueHandle_t uart_queue;
+static TaskHandle_t uart_scan_task_handle_ = NULL;
 
 
 
@@ -83,14 +86,74 @@ uint8_t rplidar_init () {
     // spin motor
     gpio_set_direction(LIDAR_MOTOR_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(LIDAR_MOTOR_PIN, 1);
+    ESP_LOGI("RPLidar", "Initialization succeeded; motor enabled");
     return true;
 }
 
 
-void rplidar_tick() {
+uint8_t rplidar_start_scanning(void* buffer, size_t size) {
+    // check that buffer for scan periodic task is big enough
+    if (size < MIN_SCAN_STACK_SIZE) {
+        return false;
+    }
 
+    // send scan request
+    const uint8_t scan_req[] = {START_REQUEST, REQUEST_COMMANDS[SCAN]};
+    int sent = uart_write_bytes(UART_NUM_1, scan_req, sizeof(scan_req));
+    if (sent != sizeof(scan_req)) {
+        return false;
+    }
+
+    // process descriptor
+    const uint8_t response_correct_descriptor[] = {START_REQUEST, 0x5A, 0x05, 0x00, 0x00, 0x40, 0x81};
+    uint8_t response_descriptor[7];
+    int descriptor_success = uart_read_bytes(UART_NUM_1, response_descriptor, 7, pdMS_TO_TICKS(10));
+    if (descriptor_success != 7 || memcmp(response_correct_descriptor, response_descriptor, 7) != 0) {
+        ESP_LOGE("RPLidar", "Error sending scan request");
+        ESP_LOG_BUFFER_HEXDUMP("RPLIDAR", response_descriptor, sizeof(response_descriptor), ESP_LOG_ERROR);
+        return false;
+    }
+    
+    // if descriptor is correct, start periodic scan processing
+    BaseType_t result = xTaskCreate(rplidar_scan_periodic, "RPLidar Periodic Scan Processing", MIN_SCAN_STACK_SIZE, buffer, 1, uart_scan_task_handle_);
+    if (result != pdPASS) {
+        return false;
+    }
+
+    return true;
 }
 
+void rplidar_scan_periodic(void* buffer) {
+}
+
+
 void rplidar_deinit() {
-    uart_driver_delete(UART_NUM_1);
+    if (uart_scan_task_handle_ != NULL) {
+        vTaskDelete(uart_scan_task_handle_);
+    }
+
+    const uint8_t stop_req[] = {START_REQUEST, REQUEST_COMMANDS[STOP]};
+    int retry_count = 3;
+
+    while (retry_count > 0) {
+        // Send STOP before removing the UART driver.
+        int sent = uart_write_bytes(UART_NUM_1, stop_req, sizeof(stop_req));
+        ESP_LOGI("RPLidar", "Attempting stop, %d attempts left.", retry_count);
+        retry_count--;
+
+        if (sent != sizeof(stop_req)) {
+            ESP_LOGE("RPLidar", "UART write failed: %d/%d bytes", sent, sizeof(stop_req));
+            continue;
+        }
+        esp_err_t err = uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(10));
+        if (err != ESP_OK) {
+            ESP_LOGE("RPLidar", "STOP transmission failed: %s", esp_err_to_name(err));
+            continue;
+        }
+        break;
+    }
+
+    gpio_set_level(LIDAR_MOTOR_PIN, 0);
+    ESP_ERROR_CHECK(uart_driver_delete(UART_NUM_1));
+    uart_queue = NULL;
 }

@@ -5,6 +5,11 @@
 #define PARSE_ANGLE(angle) (angle / 64.0f)
 #define PARSE_RANGE(range) (range / 4.0)
 #define START_REQUEST (0xA5)
+#define MAX_SAMPLING_FREQUENCY (4000)
+#define MAX_SCANS_PER_REVOLUTION (MAX_SAMPLING_FREQUENCY)
+#define MIN_SCAN_STACK_SIZE (MAX_SAMPLING_FREQUENCY * sizeof(ScanResponse) + 100)
+
+
 _Static_assert(sizeof(float) == 4,  "float must be 4 bytes");
 
 
@@ -25,7 +30,6 @@ typedef struct {
     uint16_t angle;
     uint16_t range;
 } ScanResponse;
-
 typedef struct {
     uint8_t model;
     uint8_t firmware_minor;
@@ -109,7 +113,8 @@ const static uint8_t REQUEST_COMMANDS[TOTAL_REQUEST_TYPES] = {
 
 uint8_t rplidar_init();
 void rplidar_deinit();
-void rplidar_tick();
+uint8_t rplidar_start_scanning(void* buffer, size_t size);
+void rplidar_scan_periodic(void* parameters);
 void lidar_send_request(RequestType_e type, Request request);
 void lidar_process_response(Response *response);
 void lidar_parse_scan(ScanResponse *scan_response);
