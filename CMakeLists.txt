@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22)
+set(EXTRA_COMPONENT_DIRS "src")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(ESP32-RPLIDAR-A1M8-driver)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

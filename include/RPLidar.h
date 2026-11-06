@@ -4,7 +4,7 @@
 
 #define PARSE_ANGLE(angle) (angle / 64.0f)
 #define PARSE_RANGE(range) (range / 4.0)
-
+#define START_REQUEST (0xA5)
 _Static_assert(sizeof(float) == 4,  "float must be 4 bytes");
 
 
@@ -16,8 +16,8 @@ typedef struct {
 typedef struct {
     uint64_t timestamp_ns;
     uint32_t scan_number;
-    float angles[64]; // 4khz express scan, 250 buffer drain => 16 samples per buffer => budget for 25% 
-    float ranges[64];  // in mm
+    float angles[4000]; // 4khz express scan, budget for 1Hz spinning at most
+    float ranges[4000];  // in mm
 } Scan;
 
 typedef struct {
@@ -60,7 +60,7 @@ typedef enum : uint8_t {
     GET_SAMPLERATE,
     GET_LIDAR_CONF,
     TOTAL_REQUEST_TYPES
-} RequestType;
+} RequestType_e;
 
 typedef enum : uint8_t {
     SCAN_RESPONSE = 0,
@@ -69,10 +69,10 @@ typedef enum : uint8_t {
     GET_SAMPLE_RATE_RESPONSE,
     GET_LIDAR_CONF_RESPONSE,
     TOTAL_RESPONSE_TYPES
-} ResponseType;
+} ResponseType_e;
 
 typedef struct {
-    ResponseType type;
+    ResponseType_e type;
     union {
         ScanResponse scan_response;
         GetInfoResponse get_info_response;
@@ -89,7 +89,13 @@ typedef enum : uint8_t {
     SCANNING,
     ERROR,
     TOTAL_STATE_TYPES
-} StateType;
+} StateType_e;
+
+typedef enum : uint8_t {
+    HEALTH_CLEAR = 0,
+    HEALTH_WARNING = 1,
+    HEALTH_ERROR = 2
+} GetHealthStatus_e;
 
 const static uint8_t REQUEST_COMMANDS[TOTAL_REQUEST_TYPES] = {
     [STOP] = 0x25,
@@ -101,9 +107,10 @@ const static uint8_t REQUEST_COMMANDS[TOTAL_REQUEST_TYPES] = {
     [GET_LIDAR_CONF] = 0x84,
 };
 
-void lidar_init();
-void lidar_deinit();
-void lidar_tick();
-void lidar_send_request(RequestType type, Request request);
+uint8_t rplidar_init();
+void rplidar_deinit();
+void rplidar_tick();
+void lidar_send_request(RequestType_e type, Request request);
 void lidar_process_response(Response *response);
 void lidar_parse_scan(ScanResponse *scan_response);
+
