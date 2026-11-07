@@ -15,10 +15,17 @@
 
 QueueHandle_t uart_queue;
 static TaskHandle_t uart_scan_task_handle_ = NULL;
+// this will be returned to user
+static size_t prev_scan_begin_index = 0;
+static size_t prev_scan_end_index = 0;
+// this scan will be written to
+static size_t cur_scan_begin_index = 0;
+static size_t cur_scan_end_index = 0;
+ScanResponse* uart_buffer;
+size_t uart_buffer_size;
 
 
-
-uint8_t rplidar_init () {
+uint8_t rplidar_init() {
     // configure 8N1 no RTS/DTS UART
     uart_config_t uart_config = {
         .baud_rate = 115200,
@@ -115,7 +122,10 @@ uint8_t rplidar_start_scanning(void* buffer, size_t size) {
     }
     
     // if descriptor is correct, start periodic scan processing
-    BaseType_t result = xTaskCreate(rplidar_scan_periodic, "RPLidar Periodic Scan Processing", MIN_SCAN_STACK_SIZE, buffer, 1, uart_scan_task_handle_);
+    uart_buffer = buffer;
+    uart_buffer_size = size;
+    xQueueReset(uart_queue); // drain the stale events from queue
+    BaseType_t result = xTaskCreate(rplidar_scan_periodic, "RPLidar Periodic Scan Processing", MIN_SCAN_STACK_SIZE, NULL, 1, &uart_scan_task_handle_);
     if (result != pdPASS) {
         return false;
     }
@@ -123,7 +133,53 @@ uint8_t rplidar_start_scanning(void* buffer, size_t size) {
     return true;
 }
 
-void rplidar_scan_periodic(void* buffer) {
+void rplidar_scan_periodic(void *arg) {
+    (void) arg;
+
+    uart_event_t uart_event;
+    size_t uart_buffer_index = 0;
+    ScanResponse response = {};
+    ScanResponsePayload_e current_byte = BYTE1_QUALITY; // data is not guaranteed to come in one transaction
+    uint8_t raw_buffer[20]; // for raw data
+
+    while(true) {
+        if(xQueueReceive(uart_queue, &uart_event, portMAX_DELAY) == pdTRUE) {
+            switch (uart_event.type) {
+                case UART_DATA:
+                    int response_length = uart_read_bytes(UART_NUM_1, raw_buffer, sizeof(raw_buffer), 0);
+                    for (int i = 0; i < response_length; ++i) {
+                        switch (current_byte) {
+                            // no descriptor so read straight from 0-index of the raw_buffer
+                            case BYTE1_QUALITY:
+                                response.quality = raw_buffer[i]; 
+                                break;
+                            case BYTE2_ANGLE_LSB:
+                                response.angle = raw_buffer[i] & 0xff;
+                                break;
+                            case BYTE3_ANGLE_MSB:
+                                response.angle |= (raw_buffer[i] << 8);
+                                break;
+                            case BYTE4_RANGE_LSB:
+                                response.range = raw_buffer[i] & 0xff;
+                                break;
+                            case BYTE5_RANGE_MSG:
+                                response.range |= (raw_buffer[i] << 8);
+                                uart_buffer[uart_buffer_index] = response;
+                                uart_buffer_index = (uart_buffer_index + 1) % uart_buffer_size;
+                                memset(&response, 0, sizeof(response));
+                                break;     
+                            default:
+                                break;
+                        }
+                    }
+                    break;
+                default:
+                    ESP_LOGE("RPLidar", "Error in periodic scan receive. UART event type: %d ", (uint8_t) uart_event.type);
+                    break;
+            }
+        }
+
+    }
 }
 
 

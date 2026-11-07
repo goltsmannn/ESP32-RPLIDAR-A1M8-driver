@@ -7,7 +7,7 @@
 #define START_REQUEST (0xA5)
 #define MAX_SAMPLING_FREQUENCY (4000)
 #define MAX_SCANS_PER_REVOLUTION (MAX_SAMPLING_FREQUENCY)
-#define MIN_SCAN_STACK_SIZE (MAX_SAMPLING_FREQUENCY * sizeof(ScanResponse) + 100)
+#define MIN_SCAN_STACK_SIZE 2 * (MAX_SAMPLING_FREQUENCY * sizeof(ScanResponse) + 100) // multiply by 2 so we can store two full scans as we might need to return while the other one is not full yet
 
 
 _Static_assert(sizeof(float) == 4,  "float must be 4 bytes");
@@ -67,6 +67,15 @@ typedef enum : uint8_t {
 } RequestType_e;
 
 typedef enum : uint8_t {
+    BYTE1_QUALITY = 0,
+    BYTE2_ANGLE_LSB,
+    BYTE3_ANGLE_MSB,
+    BYTE4_RANGE_LSB,
+    BYTE5_RANGE_MSG,
+    SCAN_RESPONSE_BYTES
+} ScanResponsePayload_e;
+
+typedef enum : uint8_t {
     SCAN_RESPONSE = 0,
     GET_INFO_RESPONSE,
     GET_HEALTH_RESPONSE,
@@ -114,7 +123,7 @@ const static uint8_t REQUEST_COMMANDS[TOTAL_REQUEST_TYPES] = {
 uint8_t rplidar_init();
 void rplidar_deinit();
 uint8_t rplidar_start_scanning(void* buffer, size_t size);
-void rplidar_scan_periodic(void* parameters);
+void rplidar_scan_periodic(void *arg);
 void lidar_send_request(RequestType_e type, Request request);
 void lidar_process_response(Response *response);
 void lidar_parse_scan(ScanResponse *scan_response);
